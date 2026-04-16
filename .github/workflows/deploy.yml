@@ -24,29 +24,22 @@ jobs:
             
             docker network create bot-network || true
             
-            # Bazani ishga tushirish (agar o'chiq bo'lsa yoqadi, yo'q bo'lsa yaratadi)
-            if [ ! "$(docker ps -q -f name=bot_db)" ]; then
-                if [ "$(docker ps -aq -f status=exited -f name=bot_db)" ]; then
-                    docker start bot_db
-                else
-                    docker run -d --name bot_db \
-                      --network bot-network \
-                      -e POSTGRES_USER=bot_user \
-                      -e POSTGRES_PASSWORD=bot_password \
-                      -e POSTGRES_DB=bot_database \
-                      -v pgdata:/var/lib/postgresql/data \
-                      postgres:15
-                fi
-            fi
+            # Bazani tekshirish va yoqish
+            docker run -d --name bot_db \
+              --network bot-network \
+              -e POSTGRES_USER=bot_user \
+              -e POSTGRES_PASSWORD=bot_password \
+              -e POSTGRES_DB=bot_database \
+              -v pgdata:/var/lib/postgresql/data \
+              postgres:15 || docker start bot_db
             
-            # Botni yangitdan build qilish
+            # Botni build qilish (Yangi imij bilan)
             docker build -t dir-bot .
             
-            # Eski botni to'xtatish va o'chirish (xatosiz)
+            # Konteynerlarni tozalash va qayta yoqish
             docker stop dir-bot-cont || true
             docker rm dir-bot-cont || true
             
-            # Yangi botni ishga tushirish
             docker run -d --name dir-bot-cont \
               --network bot-network \
               -e BOT_TOKEN="${{ secrets.BOT_TOKEN }}" \
