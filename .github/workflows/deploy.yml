@@ -21,13 +21,28 @@ jobs:
             git remote add origin https://github.com/Alisher20010120/dirForwarderBot.git || true
             git fetch --all
             git reset --hard origin/main
-            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
             
-            # Docker Compose-ni qaysi komanda bilan ishlashini tekshirib ishga tushiradi
-            if docker compose version > /dev/null 2>&1; then
-              docker compose down
-              docker compose up -d --build
-            else
-              docker-compose down
-              docker-compose up -d --build
-            fi
+            # Tarmoq yaratish (agar yo'q bo'lsa)
+            docker network create bot-network || true
+            
+            # Bazani ishga tushirish
+            docker run -d --name bot_db \
+              --network bot-network \
+              -e POSTGRES_USER=bot_user \
+              -e POSTGRES_PASSWORD=bot_password \
+              -e POSTGRES_DB=bot_database \
+              -v pgdata:/var/lib/postgresql/data \
+              postgres:15 || docker start bot_db
+            
+            # Botni build qilish va ishga tushirish
+            docker build -t dir-bot .
+            docker stop dir-bot-cont || true
+            docker rm dir-bot-cont || true
+            docker run -d --name dir-bot-cont \
+              --network bot-network \
+              -e BOT_TOKEN="${{ secrets.BOT_TOKEN }}" \
+              -e SPRING_DATASOURCE_URL=jdbc:postgresql://bot_db:5432/bot_database \
+              -e SPRING_DATASOURCE_USERNAME=bot_user \
+              -e SPRING_DATASOURCE_PASSWORD=bot_password \
+              -p 8080:8080 \
+              dir-bot
