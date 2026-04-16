@@ -1,0 +1,19 @@
+package com.example.dirforwarderbot.entity;
+
+public enum State {
+    FREE,
+    CONTACT,
+    WAITING_FULL_NAME,
+    WAITING_PHONE,
+    WAITING_SELECT_DIR,
+    WAITING_SELECT_GROUP,
+    WAITING_FILE,
+    WAITING_PASSWORD,
+    WAITING_QUESTION,
+    WAITING_ADMIN_ID,
+    ADMIN_MENU,
+    WAITING_DIR_NAME,
+    WAITING_DIR_ID,
+    WAITING_GROUP_NAME,
+    WAITING_TARGET_CHAT_ID
+}
