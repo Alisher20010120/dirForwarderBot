@@ -22,5 +22,12 @@ jobs:
             git fetch --all
             git reset --hard origin/main
             echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
-            docker compose down
-            docker compose up -d --build
+            
+            # Docker Compose-ni qaysi komanda bilan ishlashini tekshirib ishga tushiradi
+            if docker compose version > /dev/null 2>&1; then
+              docker compose down
+              docker compose up -d --build
+            else
+              docker-compose down
+              docker-compose up -d --build
+            fi
