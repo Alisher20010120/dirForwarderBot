@@ -1,0 +1,26 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            mkdir -p ~/dirForwarderBot && cd ~/dirForwarderBot
+            git init
+            git remote add origin https://github.com/Alisher20010120/dirForwarderBot.git || true
+            git fetch --all
+            git reset --hard origin/main
+            echo "BOT_TOKEN=${{ secrets.BOT_TOKEN }}" > .env
+            docker compose down
+            docker compose up -d --build
