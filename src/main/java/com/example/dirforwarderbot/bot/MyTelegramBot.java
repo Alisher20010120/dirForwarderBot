@@ -151,7 +151,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
             SendMessage confirmation = new SendMessage();
             confirmation.setChatId(user.getChatId().toString());
-            confirmation.setText("✅ <b>Faylingiz adminga yuborildi!</b>\n\nTez orada ko'rib chiqiladi va sizga javob qaytariladi.");
+            confirmation.setText("✅ <b>Faylingiz adminga yuborildi!</b>\n\nTez orada ko'rib chiqiladi va sizga javob qaytariladi. Odatda admin 48 soatda javob qaytaradi.");
             confirmation.setParseMode("HTML");
             execute(confirmation);
 
@@ -224,7 +224,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     private User createNewUser(Update update, Long chatId) {
         User n = new User();
         n.setChatId(chatId);
-        if (chatId.equals(913491692L)||chatId.equals(7705709414L)) {
+        if (chatId.equals(913491692L)/*||chatId.equals(7705709414L)*/) {
             n.setRole(Role.SUPER_ADMIN);
         } else {
             n.setRole(Role.USER);
