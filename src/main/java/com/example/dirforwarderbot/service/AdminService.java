@@ -17,16 +17,20 @@ public class AdminService {
     private final DirectionRepository directionRepository;
     private final GroupRepository groupRepository;
     private final KeyboardService keyboardService;
+    private final SampleRepository sampleRepository;
 
     public SendMessage handleCallback(User user, String data) {
         Long chatId = user.getChatId();
 
         if (user.getRole() != Role.ADMIN && user.getRole() != Role.SUPER_ADMIN) return null;
 
+        // --- KO'RISH (VIEW) QISMI ---
         if (data.equals("view_dirs")) return keyboardService.getDirectionList(chatId);
         if (data.equals("view_groups")) return keyboardService.getGroupList(chatId);
+        if (data.equals("view_samples")) return keyboardService.getSampleList(chatId); // Yangi
         if (data.equals("settings")) return keyboardService.getSettingsMenu(chatId);
 
+        // --- O'CHIRISH (DELETE) QISMI ---
         if (data.startsWith("del_dir_")) {
             Long id = Long.parseLong(data.replace("del_dir_", ""));
             directionRepository.deleteById(id);
@@ -37,6 +41,12 @@ public class AdminService {
             Long id = Long.parseLong(data.replace("del_group_", ""));
             groupRepository.deleteById(id);
             return keyboardService.getGroupList(chatId);
+        }
+
+        if (data.startsWith("del_sample_")) {
+            Long id = Long.parseLong(data.replace("del_sample_", ""));
+            sampleRepository.deleteById(id);
+            return keyboardService.getSampleList(chatId);
         }
 
         return null;
@@ -99,12 +109,24 @@ public class AdminService {
                     return new SendMessage(chatId.toString(), "👤 Admin qilmoqchi bo'lgan foydalanuvchining Chat ID raqamini kiriting:");
                 }
                 break;
+            case "📂 Namuna qo'shish":
+                user.setState(State.WAITING_SAMPLE_NAME);
+                userRepository.save(user);
+                return new SendMessage(chatId.toString(), "📝 Namuna nomini kiriting (masalan: Dissertatsiya namunasi):");
             case "🔝 Chiqish":
                 user.setState(State.FREE);
                 if (user.getRole() == Role.ADMIN) user.setRole(Role.USER);
                 userRepository.save(user);
                 return new SendMessage(chatId.toString(), "Siz admin paneldan chiqdingiz.");
         }
+
+        if (user.getState() == State.WAITING_SAMPLE_NAME) {
+            user.setTempData(text);
+            user.setState(State.WAITING_SAMPLE_FILE);
+            userRepository.save(user);
+            return new SendMessage(chatId.toString(), "📥 Endi ushbu namuna uchun faylni yuboring:");
+        }
+
 
         if (user.getState() == State.WAITING_DIR_NAME) {
             Directions dir = new Directions();

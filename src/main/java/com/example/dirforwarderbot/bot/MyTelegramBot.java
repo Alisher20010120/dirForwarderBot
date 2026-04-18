@@ -1,10 +1,8 @@
 package com.example.dirforwarderbot.bot;
 
-import com.example.dirforwarderbot.entity.Role;
-import com.example.dirforwarderbot.entity.State;
-import com.example.dirforwarderbot.entity.User;
-import com.example.dirforwarderbot.entity.Group;
+import com.example.dirforwarderbot.entity.*;
 import com.example.dirforwarderbot.repository.GroupRepository;
+import com.example.dirforwarderbot.repository.SampleRepository;
 import com.example.dirforwarderbot.repository.UserRepository;
 import com.example.dirforwarderbot.service.AdminService;
 import com.example.dirforwarderbot.service.KeyboardService;
@@ -31,17 +29,22 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     private final UserService userService;
     private final GroupRepository groupRepository;
     private final KeyboardService keyboardService;
+    private final SampleRepository sampleRepository;
 
     public MyTelegramBot(@Value("${bot.token}") String token,
                          UserRepository userRepository,
                          AdminService adminService,
-                         UserService userService, GroupRepository groupRepository, KeyboardService keyboardService) {
+                         UserService userService,
+                         GroupRepository groupRepository,
+                         KeyboardService keyboardService,
+                         SampleRepository sampleRepository) {
         super(token);
         this.userRepository = userRepository;
         this.adminService = adminService;
         this.userService = userService;
         this.groupRepository = groupRepository;
         this.keyboardService = keyboardService;
+        this.sampleRepository = sampleRepository;
     }
 
     @Override
@@ -50,6 +53,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             Long chatId = extractChatId(update);
             if (chatId == null) return;
 
+            // Guruh xabarlarini qayta ishlash (Admin javobi uchun)
             if (update.hasMessage() && (update.getMessage().isGroupMessage() || update.getMessage().isSuperGroupMessage())) {
                 if (update.getMessage().getReplyToMessage() != null) {
                     handleAdminReply(update);
@@ -59,6 +63,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
             User user = userRepository.findByChatId(chatId).orElseGet(() -> createNewUser(update, chatId));
 
+            // Callback query (Inline tugmalar)
             if (update.hasCallbackQuery()) {
                 if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
                     send(adminService.handleCallback(user, update.getCallbackQuery().getData()));
@@ -67,50 +72,47 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             }
 
             if (update.hasMessage()) {
+                // MATNLI XABARLAR
                 if (update.getMessage().hasText()) {
                     String text = update.getMessage().getText();
-
 
                     if (text.equals("/start")) {
                         send(userService.handleStart(user));
                     }
                     else if (text.equals("/admin")) {
-                        if (user.getRole() == Role.SUPER_ADMIN) {
-                            user.setState(State.ADMIN_MENU);
-                            userRepository.save(user);
-                            send(keyboardService.getAdminReplyMenu(user));
-                        } else if (user.getRole() == Role.ADMIN) {
-                            user.setState(State.ADMIN_MENU);
-                            userRepository.save(user);
-                            send(keyboardService.getAdminReplyMenu(user));
-                        } else {
-                            send(new SendMessage(chatId.toString(), "🔐 Admin parolini kiriting:"));
-                            user.setState(State.WAITING_PASSWORD);
-                            userRepository.save(user);
-                        }
-                    }
-                    else if (text.equals("❓ Savol berish")) {
-                        user.setState(State.WAITING_QUESTION);
-                        userRepository.save(user);
-                        send(new SendMessage(chatId.toString(), "✍️ Marhamat, savolingizni yozing. Adminlarimizga yetkazamiz:"));
+                        handleAdminCommand(user, chatId);
                     }
                     else {
-                        if (user.getState() == State.WAITING_QUESTION) {
+                        // Namunalar ko'rayotgan bo'lsa
+                        if (user.getState() == State.VIEWING_SAMPLES) {
+                            handleSampleRequest(user, text);
+                        }
+                        // Savol yuborayotgan bo'lsa
+                        else if (user.getState() == State.WAITING_QUESTION) {
                             handleQuestionToAdmin(update, user);
                         }
+                        // Admin xizmatlari
                         else if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN || user.getState() == State.WAITING_PASSWORD) {
                             send(adminService.handleText(user, text));
                         }
+                        // Oddiy foydalanuvchi xizmatlari
                         else {
                             send(userService.handleText(user, text));
                         }
                     }
                 }
+                // KONTAKT YUBORILSA
                 else if (update.getMessage().hasContact() && user.getState() == State.WAITING_PHONE) {
                     send(userService.handleContact(user, update.getMessage().getContact()));
                 }
-                else if (update.getMessage().hasDocument() && user.getState() == State.WAITING_FILE) {
-                    handleFileForwarding(update, user);
+                // FAYL (DOCUMENT) YUBORILSA
+                else if (update.getMessage().hasDocument()) {
+                    if (user.getState() == State.WAITING_SAMPLE_FILE) {
+                        saveSampleFile(update, user);
+                    }
+                    else if (user.getState() == State.WAITING_FILE) {
+                        handleFileForwarding(update, user);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -118,6 +120,57 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    // Namunani foydalanuvchiga yuborish
+    private void handleSampleRequest(User user, String text) {
+        if (text.equals("⬅️ Orqaga")) {
+            user.setState(State.FREE);
+            userRepository.save(user);
+            send(userService.getMainUserMenu(user.getChatId()));
+            return;
+        }
+
+        sampleRepository.findByDisplayName(text).ifPresentOrElse(
+                sample -> {
+                    SendDocument sd = new SendDocument();
+                    sd.setChatId(user.getChatId().toString());
+                    sd.setDocument(new InputFile(sample.getFileId()));
+                    sd.setCaption("📄 " + sample.getDisplayName());
+                    try { execute(sd); } catch (Exception e) { e.printStackTrace(); }
+                },
+                () -> send(new SendMessage(user.getChatId().toString(), "⚠️ Fayl topilmadi."))
+        );
+    }
+
+    // Admin buyrug'ini boshqarish
+    private void handleAdminCommand(User user, Long chatId) {
+        if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN) {
+            user.setState(State.ADMIN_MENU);
+            userRepository.save(user);
+            send(keyboardService.getAdminReplyMenu(user));
+        } else {
+            send(new SendMessage(chatId.toString(), "🔐 Admin parolini kiriting:"));
+            user.setState(State.WAITING_PASSWORD);
+            userRepository.save(user);
+        }
+    }
+
+    // Admin yangi namuna yuklaganda saqlash
+    private void saveSampleFile(Update update, User user) {
+        String fileId = update.getMessage().getDocument().getFileId();
+        Sample sample = new Sample();
+        sample.setDisplayName(user.getTempData());
+        sample.setFileId(fileId);
+        sampleRepository.save(sample);
+
+        user.setState(State.ADMIN_MENU);
+        user.setTempData(null);
+        userRepository.save(user);
+
+        send(new SendMessage(user.getChatId().toString(), "✅ Yangi namuna muvaffaqiyatli saqlandi!"));
+        send(keyboardService.getAdminReplyMenu(user));
+    }
+
+    // Faylni guruhga yo'naltirish mantiqi (O'zgarmadi)
     private void handleFileForwarding(Update update, User user) {
         try {
             Optional<Group> groupOpt = groupRepository.findByName(user.getSelectedGroup());
@@ -126,85 +179,60 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 return;
             }
 
-            String targetChatId = groupOpt.get().getTargetChatId();
-
             SendDocument sd = new SendDocument();
-            sd.setChatId(targetChatId);
+            sd.setChatId(groupOpt.get().getTargetChatId());
             sd.setDocument(new InputFile(update.getMessage().getDocument().getFileId()));
-
-            String caption = "<b>📄 Yangi topshiriq!</b>\n\n" +
-                    "👤 <b>Talaba:</b> " + user.getFullName() + "\n" +
-                    "📁 <b>Yo'nalish:</b> " + user.getSelectedDirection() + "\n" +
-                    "📞 <b>Tel:</b> " + user.getPhoneNumber() + "\n\n" +
-                    "<code>#user_" + user.getChatId() + "</code>";
-
-            sd.setCaption(caption);
+            sd.setCaption("<b>📄 Yangi topshiriq!</b>\n\n👤 Talaba: " + user.getFullName() +
+                    "\n📁 Yo'nalish: " + user.getSelectedDirection() +
+                    "\n📞 Tel: " + user.getPhoneNumber() +
+                    "\n\n<code>#user_" + user.getChatId() + "</code>");
             sd.setParseMode("HTML");
             execute(sd);
 
-            SendMessage confirmation = new SendMessage();
-            confirmation.setChatId(user.getChatId().toString());
-            confirmation.setText("✅ <b>Faylingiz adminga yuborildi!</b>\n\nTez orada ko'rib chiqiladi va sizga javob qaytariladi. Odatda admin 48 soatda javob qaytaradi.");
-            confirmation.setParseMode("HTML");
-            execute(confirmation);
-
+            send(new SendMessage(user.getChatId().toString(), "✅ Faylingiz adminga yuborildi!"));
             user.setState(State.FREE);
             userRepository.save(user);
             send(userService.getMainUserMenu(user.getChatId()));
-
         } catch (Exception e) { e.printStackTrace(); }
     }
 
+    // Admin javobini foydalanuvchiga yuborish
     private void handleAdminReply(Update update) {
         try {
             var replyTo = update.getMessage().getReplyToMessage();
-            String caption = replyTo.getCaption();
-            
-            if (caption == null && replyTo.hasText()) caption = replyTo.getText();
-
-            if (caption != null && caption.contains("#user_")) {
-                int start = caption.indexOf("#user_") + 6;
-                String idStr = caption.substring(start).replaceAll("[^0-9]", "");
+            String content = replyTo.getCaption() != null ? replyTo.getCaption() : replyTo.getText();
+            if (content != null && content.contains("#user_")) {
+                int start = content.indexOf("#user_") + 6;
+                String idStr = content.substring(start).replaceAll("[^0-9]", "");
                 Long targetUserId = Long.parseLong(idStr);
 
                 SendMessage sm = new SendMessage();
                 sm.setChatId(targetUserId.toString());
-                sm.setText("<b>👨‍🏫 Admin javobi:</b>\n\n" + update.getMessage().getText() +
-                        "\n\n<i>Tushunarsiz joyi bo'lsa, quyidagi tugmani bosib savol yuborishingiz mumkin:</i>");
+                sm.setText("<b>👨‍🏫 Admin javobi:</b>\n\n" + update.getMessage().getText());
                 sm.setParseMode("HTML");
-
-                ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
-                markup.setResizeKeyboard(true);
-                markup.setOneTimeKeyboard(true);
-                markup.setKeyboard(List.of(new KeyboardRow(List.of(new KeyboardButton("❓ Savol berish")))));
-                sm.setReplyMarkup(markup);
-
                 execute(sm);
             }
         } catch (Exception e) { e.printStackTrace(); }
     }
 
+    // Savolni guruhga yuborish
     private void handleQuestionToAdmin(Update update, User user) {
         try {
             Optional<Group> groupOpt = groupRepository.findByName(user.getSelectedGroup());
-            if (groupOpt.isPresent()) {
-                SendMessage sm = new SendMessage();
-                sm.setChatId(groupOpt.get().getTargetChatId());
-                sm.setText("<b>❓ Yangi savol keldi!</b>\n\n" +
-                        "👤 <b>Talaba:</b> " + user.getFullName() + "\n" +
-                        "💬 <b>Savol:</b> " + update.getMessage().getText() + "\n\n" +
-                        "<code>#user_" + user.getChatId() + "</code>");
-                sm.setParseMode("HTML");
-                execute(sm);
+            String targetId = groupOpt.isPresent() ? groupOpt.get().getTargetChatId() : "ADMIN_CHAT_ID"; // Default admin chat
 
-                SendMessage confirmation = new SendMessage(user.getChatId().toString(), "✅ Savolingiz yuborildi. Adminlarimiz javob berishini kuting.");
-                confirmation.setParseMode("HTML");
-                send(confirmation);
+            SendMessage sm = new SendMessage();
+            sm.setChatId(targetId);
+            sm.setText("<b>❓ Yangi savol!</b>\n\n👤 Talaba: " + user.getFullName() +
+                    "\n💬 Savol: " + update.getMessage().getText() +
+                    "\n\n<code>#user_" + user.getChatId() + "</code>");
+            sm.setParseMode("HTML");
+            execute(sm);
 
-                user.setState(State.FREE);
-                userRepository.save(user);
-                send(userService.getMainUserMenu(user.getChatId()));
-            }
+            send(new SendMessage(user.getChatId().toString(), "✅ Savolingiz yuborildi."));
+            user.setState(State.FREE);
+            userRepository.save(user);
+            send(userService.getMainUserMenu(user.getChatId()));
         } catch (Exception e) { e.printStackTrace(); }
     }
 
@@ -217,11 +245,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
     private User createNewUser(Update update, Long chatId) {
         User n = new User();
         n.setChatId(chatId);
-        if (chatId.equals(913491692L)/*||chatId.equals(7705709414L)*/) {
-            n.setRole(Role.SUPER_ADMIN);
-        } else {
-            n.setRole(Role.USER);
-        }
+        n.setRole(chatId.equals(913491692L) ? Role.SUPER_ADMIN : Role.USER);
         n.setState(State.FREE);
         n.setUsername(update.getMessage().getFrom().getUserName());
         return userRepository.save(n);

@@ -18,6 +18,7 @@ public class User extends BaseEntity {
     private String selectedDirection;
     private String selectedGroup;
     private String username;
+    private String tempData;
 
     @Enumerated(EnumType.STRING)
     private State state = State.FREE;
