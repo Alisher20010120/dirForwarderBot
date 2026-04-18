@@ -50,16 +50,9 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             Long chatId = extractChatId(update);
             if (chatId == null) return;
 
-            // --- 1. GURUHDA ISHLASH MANTIQI ---
             if (update.hasMessage() && (update.getMessage().isGroupMessage() || update.getMessage().isSuperGroupMessage())) {
                 if (update.getMessage().getReplyToMessage() != null) {
-                    Long senderId = update.getMessage().getFrom().getId();
-                    userRepository.findByChatId(senderId).ifPresent(u -> {
-                        // Admin YOKI Super Admin reply qilsa javob yuborilsin
-                        if (u.getRole() == Role.ADMIN || u.getRole() == Role.SUPER_ADMIN) {
-                            handleAdminReply(update);
-                        }
-                    });
+                    handleAdminReply(update);
                 }
                 return;
             }
