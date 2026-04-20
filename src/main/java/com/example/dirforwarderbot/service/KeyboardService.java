@@ -152,4 +152,19 @@ public class KeyboardService {
         btn.setCallbackData(callback);
         return btn;
     }
+
+    public SendMessage getBackMenu(Long chatId, String text) {
+        SendMessage sm = new SendMessage(chatId.toString(), text);
+        ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
+        markup.setResizeKeyboard(true);
+
+        List<KeyboardRow> keyboard = new ArrayList<>();
+        KeyboardRow row = new KeyboardRow();
+        row.add(new KeyboardButton("⬅️ Orqaga"));
+        keyboard.add(row);
+
+        markup.setKeyboard(keyboard);
+        sm.setReplyMarkup(markup);
+        return sm;
+    }
 }

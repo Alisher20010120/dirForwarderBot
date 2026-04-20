@@ -18,6 +18,7 @@ public class AdminService {
     private final GroupRepository groupRepository;
     private final KeyboardService keyboardService;
     private final SampleRepository sampleRepository;
+    private final UserService userService;
 
     public SendMessage handleCallback(User user, String data) {
         Long chatId = user.getChatId();
@@ -55,20 +56,10 @@ public class AdminService {
     public SendMessage handleText(User user, String text) {
         Long chatId = user.getChatId();
 
-        if (user.getState() == State.WAITING_PASSWORD) {
-            if (text.equals("123")) {
-                user.setRole(Role.ADMIN);
-                user.setState(State.ADMIN_MENU);
-                userRepository.save(user);
-                return keyboardService.getAdminReplyMenu(user);
-            }
-            user.setState(State.FREE);
-            userRepository.save(user);
-            return new SendMessage(chatId.toString(), "❌ Parol noto'g'ri!");
-        }
-
+        // Faqat bazada roli borlar kira oladi
         if (user.getRole() != Role.ADMIN && user.getRole() != Role.SUPER_ADMIN) return null;
 
+        // Super Admin tomonidan admin qo'shish (Chat ID orqali)
         if (user.getState() == State.WAITING_ADMIN_ID && user.getRole() == Role.SUPER_ADMIN) {
             try {
                 Long targetChatId = Long.parseLong(text.trim());
@@ -84,7 +75,7 @@ public class AdminService {
 
                     return new SendMessage(chatId.toString(), "✅ <b>" + targetUser.getFullName() + "</b> muvaffaqiyatli ADMIN qilindi!");
                 } else {
-                    return new SendMessage(chatId.toString(), "❌ Xato: Bu Chat ID bazada topilmadi. Avval u odam botga start bosgan bo'lishi kerak.");
+                    return new SendMessage(chatId.toString(), "❌ Xato: Bu Chat ID bazada topilmadi.");
                 }
             } catch (NumberFormatException e) {
                 return new SendMessage(chatId.toString(), "⚠️ Iltimos, faqat raqamlardan iborat Chat ID yuboring.");
@@ -112,21 +103,20 @@ public class AdminService {
             case "📂 Namuna qo'shish":
                 user.setState(State.WAITING_SAMPLE_NAME);
                 userRepository.save(user);
-                return new SendMessage(chatId.toString(), "📝 Namuna nomini kiriting (masalan: Dissertatsiya namunasi):");
+                return new SendMessage(chatId.toString(), "📝 Namuna nomini kiriting:");
             case "🔝 Chiqish":
                 user.setState(State.FREE);
-                if (user.getRole() == Role.ADMIN) user.setRole(Role.USER);
                 userRepository.save(user);
-                return new SendMessage(chatId.toString(), "Siz admin paneldan chiqdingiz.");
+                return userService.handleStart(user);
         }
 
+        // State mantiqlari (Yo'nalish, Guruh, Namuna saqlash qismlari)
         if (user.getState() == State.WAITING_SAMPLE_NAME) {
             user.setTempData(text);
             user.setState(State.WAITING_SAMPLE_FILE);
             userRepository.save(user);
             return new SendMessage(chatId.toString(), "📥 Endi ushbu namuna uchun faylni yuboring:");
         }
-
 
         if (user.getState() == State.WAITING_DIR_NAME) {
             Directions dir = new Directions();

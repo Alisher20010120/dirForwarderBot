@@ -14,11 +14,8 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.ReplyKeyboardMarkup;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardButton;
-import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 
-import java.util.List;
+
 import java.util.Optional;
 
 @Component
@@ -53,17 +50,15 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             Long chatId = extractChatId(update);
             if (chatId == null) return;
 
-            // Guruh xabarlarini qayta ishlash (Admin javobi uchun)
+            // 1. Guruh xabarlari (Admin javob qaytarganda)
             if (update.hasMessage() && (update.getMessage().isGroupMessage() || update.getMessage().isSuperGroupMessage())) {
-                if (update.getMessage().getReplyToMessage() != null) {
-                    handleAdminReply(update);
-                }
+                if (update.getMessage().getReplyToMessage() != null) handleAdminReply(update);
                 return;
             }
 
             User user = userRepository.findByChatId(chatId).orElseGet(() -> createNewUser(update, chatId));
 
-            // Callback query (Inline tugmalar)
+            // 2. Inline tugmalar (Callback Query)
             if (update.hasCallbackQuery()) {
                 if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
                     send(adminService.handleCallback(user, update.getCallbackQuery().getData()));
@@ -71,48 +66,80 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 return;
             }
 
+            // 3. Xabarlarni qayta ishlash (Message handling)
             if (update.hasMessage()) {
-                // MATNLI XABARLAR
+
+                // A) Kontakt yuborilganda
+                if (update.getMessage().hasContact() && user.getState() == State.WAITING_PHONE) {
+                    send(userService.handleContact(user, update.getMessage().getContact()));
+                    return;
+                }
+
+                // B) Fayl (Document) yuborilganda
+                if (update.getMessage().hasDocument()) {
+                    if (user.getState() == State.WAITING_SAMPLE_FILE) saveSampleFile(update, user);
+                    else if (user.getState() == State.WAITING_FILE) handleFileForwarding(update, user);
+                    return;
+                }
+
+                // C) Text xabarlar kelganda
                 if (update.getMessage().hasText()) {
                     String text = update.getMessage().getText();
 
+                    // --- GLOBAL BUYRUQLAR ---
                     if (text.equals("/start")) {
                         send(userService.handleStart(user));
+                        return;
                     }
-                    else if (text.equals("/admin")) {
-                        handleAdminCommand(user, chatId);
+
+                    if (text.equals("⬅️ Orqaga")) {
+                        user.setState(State.FREE);
+                        userRepository.save(user);
+                        send(userService.getMainUserMenu(chatId));
+                        return;
                     }
-                    else {
-                        // Namunalar ko'rayotgan bo'lsa
-                        if (user.getState() == State.VIEWING_SAMPLES) {
-                            handleSampleRequest(user, text);
+
+                    if (text.equals("/admin")) {
+                        if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
+                            user.setState(State.ADMIN_MENU);
+                            userRepository.save(user);
+                            send(keyboardService.getAdminReplyMenu(user));
+                        } else {
+                            send(new SendMessage(chatId.toString(), "❌ Kechirasiz, sizda admin huquqi yo'q!"));
                         }
-                        // Savol yuborayotgan bo'lsa
-                        else if (user.getState() == State.WAITING_QUESTION) {
-                            handleQuestionToAdmin(update, user);
-                        }
-                        // Admin xizmatlari
-                        else if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN || user.getState() == State.WAITING_PASSWORD) {
-                            send(adminService.handleText(user, text));
-                        }
-                        // Oddiy foydalanuvchi xizmatlari
-                        else {
-                            send(userService.handleText(user, text));
-                        }
+                        return;
                     }
-                }
-                // KONTAKT YUBORILSA
-                else if (update.getMessage().hasContact() && user.getState() == State.WAITING_PHONE) {
-                    send(userService.handleContact(user, update.getMessage().getContact()));
-                }
-                // FAYL (DOCUMENT) YUBORILSA
-                else if (update.getMessage().hasDocument()) {
-                    if (user.getState() == State.WAITING_SAMPLE_FILE) {
-                        saveSampleFile(update, user);
+
+                    // --- HOLATGA (STATE) QARAB ISHLASH ---
+
+                    // 1. Ro'yxatdan o'tish jarayoni (Ism, Guruh, Yo'nalish kutish)
+                    if (user.getState() == State.WAITING_FULL_NAME ||
+                            user.getState() == State.WAITING_SELECT_GROUP ||
+                            user.getState() == State.WAITING_SELECT_DIR) {
+                        send(userService.handleText(user, text));
+                        return;
                     }
-                    else if (user.getState() == State.WAITING_FILE) {
-                        handleFileForwarding(update, user);
+
+                    // 2. Savol berish jarayoni (Savol matni yozilganda)
+                    if (user.getState() == State.WAITING_QUESTION) {
+                        handleQuestionToAdmin(update, user);
+                        return;
                     }
+
+                    // 3. Namunalar bo'limi (Namuna nomi tanlanganda)
+                    if (user.getState() == State.VIEWING_SAMPLES) {
+                        handleSampleRequest(user, text);
+                        return;
+                    }
+
+                    // 4. Admin menyusi va admin kutayotgan matnlar
+                    if ((user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) && user.getState() != State.FREE) {
+                        send(adminService.handleText(user, text));
+                        return;
+                    }
+
+                    // 5. Asosiy menyu tugmalari (Fayl yuborish, Savol berish tugmasi bosilganda)
+                    send(userService.handleText(user, text));
                 }
             }
         } catch (Exception e) {
@@ -120,7 +147,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    // Namunani foydalanuvchiga yuborish
     private void handleSampleRequest(User user, String text) {
         if (text.equals("⬅️ Orqaga")) {
             user.setState(State.FREE);
@@ -135,13 +161,16 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                     sd.setChatId(user.getChatId().toString());
                     sd.setDocument(new InputFile(sample.getFileId()));
                     sd.setCaption("📄 " + sample.getDisplayName());
-                    try { execute(sd); } catch (Exception e) { e.printStackTrace(); }
+                    try {
+                        execute(sd);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 },
                 () -> send(new SendMessage(user.getChatId().toString(), "⚠️ Fayl topilmadi."))
         );
     }
 
-    // Admin buyrug'ini boshqarish
     private void handleAdminCommand(User user, Long chatId) {
         if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN) {
             user.setState(State.ADMIN_MENU);
@@ -154,7 +183,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
-    // Admin yangi namuna yuklaganda saqlash
     private void saveSampleFile(Update update, User user) {
         String fileId = update.getMessage().getDocument().getFileId();
         Sample sample = new Sample();
@@ -170,7 +198,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         send(keyboardService.getAdminReplyMenu(user));
     }
 
-    // Faylni guruhga yo'naltirish mantiqi (O'zgarmadi)
     private void handleFileForwarding(Update update, User user) {
         try {
             Optional<Group> groupOpt = groupRepository.findByName(user.getSelectedGroup());
@@ -193,10 +220,11 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             user.setState(State.FREE);
             userRepository.save(user);
             send(userService.getMainUserMenu(user.getChatId()));
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    // Admin javobini foydalanuvchiga yuborish
     private void handleAdminReply(Update update) {
         try {
             var replyTo = update.getMessage().getReplyToMessage();
@@ -212,10 +240,11 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 sm.setParseMode("HTML");
                 execute(sm);
             }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    // Savolni guruhga yuborish
     private void handleQuestionToAdmin(Update update, User user) {
         try {
             Optional<Group> groupOpt = groupRepository.findByName(user.getSelectedGroup());
@@ -233,7 +262,9 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             user.setState(State.FREE);
             userRepository.save(user);
             send(userService.getMainUserMenu(user.getChatId()));
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private Long extractChatId(Update update) {
@@ -253,9 +284,15 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
     public void send(SendMessage sm) {
         if (sm == null) return;
-        try { execute(sm); } catch (Exception e) { e.printStackTrace(); }
+        try {
+            execute(sm);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
-    public String getBotUsername() { return "SIZNING_BOT_USERNAMINGIZ"; }
+    public String getBotUsername() {
+        return "SIZNING_BOT_USERNAMINGIZ";
+    }
 }
