@@ -1,5 +1,6 @@
 package com.example.dirforwarderbot.service;
 
+import com.example.dirforwarderbot.entity.Role;
 import com.example.dirforwarderbot.entity.State;
 import com.example.dirforwarderbot.entity.User;
 import com.example.dirforwarderbot.repository.DirectionRepository;
@@ -29,76 +30,75 @@ public class UserService {
     public SendMessage handleStart(User user) {
         Long chatId = user.getChatId();
 
-        // 1. Ism familiya tekshiruvi
-        if (user.getFullName() == null) {
-            user.setState(State.WAITING_FULL_NAME);
+        // Admin/SuperAdmin bo'lsa va telefoni bor bo'lsa — kontakt so'ramasdan user menyusi
+        boolean isAdmin = user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN;
+        if (isAdmin && user.getPhoneNumber() != null) {
+            user.setState(State.FREE);
             userRepository.save(user);
-            SendMessage sm = new SendMessage(chatId.toString(), "Assalomu alaykum! Botdan foydalanish uchun ism va familiyangizni kiriting:");
+            return getMainUserMenu(user);
+        }
 
-            // MUHIM: Bu yerda eski (Admin) menyuni o'chirib tashlaymiz
+        // Oddiy user yoki telefoni yo'q — kontakt so'raymiz
+        user.setState(State.WAITING_PHONE);
+        userRepository.save(user);
+        return askPhone(chatId);
+    }
+
+    public SendMessage handleContact(User user, Contact contact) {
+        Long chatId = user.getChatId();
+        String phone = contact.getPhoneNumber().replaceAll("[^0-9]", "");
+
+        User dbUser = userRepository.findByPhoneNumber(phone).orElse(null);
+
+        if (dbUser == null) {
+            user.setState(State.FREE);
+            userRepository.save(user);
+            SendMessage sm = new SendMessage(chatId.toString(),
+                    "❌ Kechirasiz, sizning raqamingiz tizimda topilmadi.\n\n" +
+                            "📞 Iltimos, admin bilan bog'laning.");
             sm.setReplyMarkup(new ReplyKeyboardRemove(true));
             return sm;
         }
 
-        // 2. Telefon raqami tekshiruvi
-        if (user.getPhoneNumber() == null) {
-            user.setState(State.WAITING_PHONE);
+        if (user.getId().equals(dbUser.getId())) {
+            // Bir xil yozuv — shunchaki yangilaymiz
+            user.setChatId(chatId);
+            user.setState(State.FREE);
             userRepository.save(user);
-            return askPhone(chatId);
+        } else {
+            // Ikki xil yozuv — merge qilamiz
+            dbUser.setChatId(chatId);
+            dbUser.setState(State.FREE);
+
+            // Agar session user SUPER_ADMIN yoki ADMIN bo'lsa — rolini saqlaymiz
+            if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN) {
+                dbUser.setRole(user.getRole());
+            }
+
+            userRepository.save(dbUser);
+
+            // Bo'sh session userni o'chiramiz
+            userRepository.delete(user);
+
+            user = dbUser;
         }
 
-        // 3. Guruh tekshiruvi
-        if (user.getSelectedGroup() == null) {
-            user.setState(State.WAITING_SELECT_GROUP);
-            userRepository.save(user);
-            return showGroups(chatId);
-        }
-
-        // 4. Yo'nalish tekshiruvi
-        if (user.getSelectedDirection() == null) {
-            user.setState(State.WAITING_SELECT_DIR);
-            userRepository.save(user);
-            return showDirections(chatId);
-        }
-
-        user.setState(State.FREE);
-        userRepository.save(user);
-
-        SendMessage sm = new SendMessage(chatId.toString(), "Asosiy menyuga xush kelibsiz!");
-        sm.setReplyMarkup(getMainUserMenu(chatId).getReplyMarkup());
+        SendMessage sm = new SendMessage(chatId.toString(),
+                "✅ Xush kelibsiz, <b>" + user.getFullName() + "</b>!\n" +
+                        "🏢 Guruh: " + user.getSelectedGroup() + "\n" +
+                        "📁 Yo'nalish: " + user.getSelectedDirection());
+        sm.enableHtml(true);
+        sm.setReplyMarkup(getMainUserMenu(user).getReplyMarkup());
         return sm;
     }
 
     public SendMessage handleText(User user, String text) {
         Long chatId = user.getChatId();
 
-        // Ism kiritilganda -> darhol telefon so'rash
-        if (user.getState() == State.WAITING_FULL_NAME) {
-            user.setFullName(text);
-            user.setState(State.WAITING_PHONE);
-            userRepository.save(user);
-            return askPhone(chatId);
+        if (user.getPhoneNumber() == null) {
+            return handleStart(user);
         }
 
-        // Guruh tanlanganda -> darhol yo'nalish so'rash
-        if (user.getState() == State.WAITING_SELECT_GROUP) {
-            user.setSelectedGroup(text);
-            user.setState(State.WAITING_SELECT_DIR);
-            userRepository.save(user);
-            return showDirections(chatId);
-        }
-
-        // Yo'nalish tanlanganda -> Asosiy menyu
-        if (user.getState() == State.WAITING_SELECT_DIR) {
-            user.setSelectedDirection(text);
-            user.setState(State.FREE);
-            userRepository.save(user);
-            SendMessage sm = new SendMessage(chatId.toString(), "✅ Ma'lumotlaringiz muvaffaqiyatli saqlandi.");
-            sm.setReplyMarkup(getMainUserMenu(chatId).getReplyMarkup());
-            return sm;
-        }
-
-        // --- ASOSIY MENYU TUGMALARI ---
         switch (text) {
             case "📄 Namunalar":
                 user.setState(State.VIEWING_SAMPLES);
@@ -120,47 +120,69 @@ public class UserService {
                             "📥 Marhamat, faylni (Document) yuboring:";
                     return keyboardService.getBackMenu(chatId, msg);
                 } else {
-                    return handleStart(user);
+                    return new SendMessage(chatId.toString(),
+                            "⚠️ Guruh yoki yo'nalish ma'lumotlaringiz topilmadi.\n" +
+                                    "📞 Iltimos, admin bilan bog'laning.");
                 }
 
-            case "🔄 Ma'lumotlarni yangilash":
-                user.setState(State.WAITING_FULL_NAME);
-                userRepository.save(user);
-                return keyboardService.getBackMenu(chatId, "🔄 Ma'lumotlarni yangilash uchun yangi ism-familiyangizni kiriting:");
-            case "⬆️ Chiqish": // "Chiqish" tugmasi bosilganda ham shu mantiq ishlaydi
-                user.setFullName(null);
-                user.setPhoneNumber(null);
-                user.setSelectedGroup(null);
-                user.setSelectedDirection(null);
-                userRepository.save(user); // Ma'lumotlarni bazada o'chirish
-                return handleStart(user);
+            case "🔑 Admin panel":
+                if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
+                    user.setState(State.ADMIN_MENU);
+                    userRepository.save(user);
+                    return keyboardService.getAdminReplyMenu(user);
+                }
+                break;
+
+            case "⬅️ Orqaga":
+                return getMainUserMenu(user);
+
+            default:
+                return getMainUserMenu(user);
         }
 
-        return getMainUserMenu(chatId);
+        return getMainUserMenu(user);
     }
 
-    public SendMessage handleContact(User user, Contact contact) {
-        user.setPhoneNumber(contact.getPhoneNumber());
-        user.setState(State.WAITING_SELECT_GROUP);
-        userRepository.save(user);
-        return showGroups(user.getChatId());
-    }
-
-    public SendMessage getMainUserMenu(Long chatId) {
-        SendMessage sm = new SendMessage(chatId.toString(), "Menyuni tanlang:");
+    // ✅ User obyekti bilan — admin bo'lsa "🔑 Admin panel" tugmasi ko'rinadi
+    public SendMessage getMainUserMenu(User user) {
+        Long chatId = user.getChatId();
+        SendMessage sm = new SendMessage(chatId.toString(), "📋 Menyuni tanlang:");
         ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
         markup.setResizeKeyboard(true);
+
         List<KeyboardRow> keyboard = new ArrayList<>();
+
         KeyboardRow row1 = new KeyboardRow();
         row1.add(new KeyboardButton("📤 Fayl yuborish"));
         row1.add(new KeyboardButton("📄 Namunalar"));
+
         KeyboardRow row2 = new KeyboardRow();
-        row2.add(new KeyboardButton("🔄 Ma'lumotlarni yangilash"));
         row2.add(new KeyboardButton("❓ Savol berish"));
-        keyboard.add(row1); keyboard.add(row2);
+
+        keyboard.add(row1);
+        keyboard.add(row2);
+
+        // Admin/SuperAdmin bo'lsa — "🔑 Admin panel" tugmasi qo'shiladi
+        if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
+            KeyboardRow row3 = new KeyboardRow();
+            row3.add(new KeyboardButton("🔑 Admin panel"));
+            keyboard.add(row3);
+        }
+
         markup.setKeyboard(keyboard);
         sm.setReplyMarkup(markup);
         return sm;
+    }
+
+    // ✅ Faqat chatId bilan — MyTelegramBot ichida ishlatilganda
+    public SendMessage getMainUserMenu(Long chatId) {
+        User user = userRepository.findByChatId(chatId).orElseGet(() -> {
+            User dummy = new User();
+            dummy.setChatId(chatId);
+            dummy.setRole(Role.USER);
+            return dummy;
+        });
+        return getMainUserMenu(user);
     }
 
     public SendMessage showGroups(Long chatId) {
@@ -196,7 +218,9 @@ public class UserService {
     }
 
     private SendMessage askPhone(Long chatId) {
-        SendMessage sm = new SendMessage(chatId.toString(), "📱 Telefon raqamingizni yuboring:");
+        SendMessage sm = new SendMessage(chatId.toString(),
+                "👋 Assalomu alaykum!\n\n" +
+                        "Botdan foydalanish uchun telefon raqamingizni ulashing 👇");
         ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
         markup.setResizeKeyboard(true);
         KeyboardButton btn = new KeyboardButton("📱 Kontaktni ulash");

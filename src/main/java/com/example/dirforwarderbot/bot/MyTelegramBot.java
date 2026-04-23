@@ -75,10 +75,16 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                     return;
                 }
 
-                // B) Fayl (Document) yuborilganda
                 if (update.getMessage().hasDocument()) {
-                    if (user.getState() == State.WAITING_SAMPLE_FILE) saveSampleFile(update, user);
-                    else if (user.getState() == State.WAITING_FILE) handleFileForwarding(update, user);
+                    if (user.getState() == State.WAITING_SAMPLE_FILE) {
+                        saveSampleFile(update, user);
+                    } else if (user.getState() == State.WAITING_FILE) {
+                        handleFileForwarding(update, user);
+                    }
+                    else if (user.getState() == State.WAITING_EXCEL_FILE &&
+                            (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN)) {
+                        handleExcelImport(update, user);
+                    }
                     return;
                 }
 
@@ -147,6 +153,36 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    private void handleExcelImport(Update update, User user) {
+        try {
+            String fileId = update.getMessage().getDocument().getFileId();
+            String fileName = update.getMessage().getDocument().getFileName();
+
+            if (fileName != null && !fileName.endsWith(".xlsx")) {
+                send(new SendMessage(user.getChatId().toString(), "⚠️ Iltimos, faqat Excel (.xlsx) fayl yuboring."));
+                return;
+            }
+
+            org.telegram.telegrambots.meta.api.methods.GetFile getFile = new org.telegram.telegrambots.meta.api.methods.GetFile();
+            getFile.setFileId(fileId);
+            org.telegram.telegrambots.meta.api.objects.File file = execute(getFile);
+
+            java.io.File downloadedFile = downloadFile(file);
+
+            adminService.importUsersFromExcel(downloadedFile);
+
+            user.setState(State.ADMIN_MENU);
+            userRepository.save(user);
+
+            send(new SendMessage(user.getChatId().toString(), "✅ Exceldagi foydalanuvchilar muvaffaqiyatli bazaga yuklandi!"));
+            send(keyboardService.getAdminReplyMenu(user));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            send(new SendMessage(user.getChatId().toString(), "❌ Xatolik yuz berdi: " + e.getMessage()));
+        }
+    }
+
     private void handleSampleRequest(User user, String text) {
         if (text.equals("⬅️ Orqaga")) {
             user.setState(State.FREE);
@@ -171,17 +207,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         );
     }
 
-    private void handleAdminCommand(User user, Long chatId) {
-        if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN) {
-            user.setState(State.ADMIN_MENU);
-            userRepository.save(user);
-            send(keyboardService.getAdminReplyMenu(user));
-        } else {
-            send(new SendMessage(chatId.toString(), "🔐 Admin parolini kiriting:"));
-            user.setState(State.WAITING_PASSWORD);
-            userRepository.save(user);
-        }
-    }
 
     private void saveSampleFile(Update update, User user) {
         String fileId = update.getMessage().getDocument().getFileId();
