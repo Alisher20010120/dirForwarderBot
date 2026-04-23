@@ -27,7 +27,6 @@ public class KeyboardService {
     private final SampleRepository sampleRepository;
     private final UserRepository userRepository;
 
-    // Foydalanuvchi uchun namunalar tugmalari
     public SendMessage getSamplesReplyMenu(Long chatId) {
         SendMessage sm = new SendMessage(chatId.toString(), "📄 Kerakli namunani yuklab olish uchun tanlang:");
         ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
@@ -54,7 +53,6 @@ public class KeyboardService {
         return sm;
     }
 
-    // Admin uchun Reply Menyu (Asosiy panel)
     public SendMessage getAdminReplyMenu(User user) {
         SendMessage sm = new SendMessage(user.getChatId().toString(), "🛠 Admin paneli:");
         ReplyKeyboardMarkup markup = new ReplyKeyboardMarkup();
@@ -85,7 +83,6 @@ public class KeyboardService {
         return sm;
     }
 
-    // Admin Sozlamalar (Inline)
     public SendMessage getSettingsMenu(User user) {
         SendMessage sm = new SendMessage(user.getChatId().toString(), "⚙️ **Sozlamalar bo'limi:**");
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();
@@ -94,7 +91,6 @@ public class KeyboardService {
         rows.add(List.of(createInlineBtn("👥 Guruhlarni boshqarish", "view_groups")));
         rows.add(List.of(createInlineBtn("📄 Namunalarni boshqarish", "view_samples")));
 
-        // Faqat Super Admin uchun Adminlarni boshqarish tugmasi
         if (user.getRole() == Role.SUPER_ADMIN) {
             rows.add(List.of(createInlineBtn("👮‍♂️ Adminlarni boshqarish", "view_admins")));
         }
@@ -104,7 +100,6 @@ public class KeyboardService {
         return sm;
     }
 
-    // Adminlar ro'yxati (Faqat Super Admin uchun)
     public SendMessage getAdminList(Long chatId) {
         SendMessage sm = new SendMessage(chatId.toString(), "👮‍♂️ **Bot adminlari ro'yxati:**");
         InlineKeyboardMarkup markup = new InlineKeyboardMarkup();

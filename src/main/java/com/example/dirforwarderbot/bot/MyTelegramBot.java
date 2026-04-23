@@ -50,7 +50,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             Long chatId = extractChatId(update);
             if (chatId == null) return;
 
-            // 1. Guruh xabarlari (Admin javob qaytarganda)
             if (update.hasMessage() && (update.getMessage().isGroupMessage() || update.getMessage().isSuperGroupMessage())) {
                 if (update.getMessage().getReplyToMessage() != null) handleAdminReply(update);
                 return;
@@ -58,7 +57,6 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
             User user = userRepository.findByChatId(chatId).orElseGet(() -> createNewUser(update, chatId));
 
-            // 2. Inline tugmalar (Callback Query)
             if (update.hasCallbackQuery()) {
                 if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
                     send(adminService.handleCallback(user, update.getCallbackQuery().getData()));
@@ -66,10 +64,8 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                 return;
             }
 
-            // 3. Xabarlarni qayta ishlash (Message handling)
             if (update.hasMessage()) {
 
-                // A) Kontakt yuborilganda
                 if (update.getMessage().hasContact() && user.getState() == State.WAITING_PHONE) {
                     send(userService.handleContact(user, update.getMessage().getContact()));
                     return;
@@ -88,11 +84,9 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                     return;
                 }
 
-                // C) Text xabarlar kelganda
                 if (update.getMessage().hasText()) {
                     String text = update.getMessage().getText();
 
-                    // --- GLOBAL BUYRUQLAR ---
                     if (text.equals("/start")) {
                         send(userService.handleStart(user));
                         return;
@@ -116,9 +110,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                         return;
                     }
 
-                    // --- HOLATGA (STATE) QARAB ISHLASH ---
 
-                    // 1. Ro'yxatdan o'tish jarayoni (Ism, Guruh, Yo'nalish kutish)
                     if (user.getState() == State.WAITING_FULL_NAME ||
                             user.getState() == State.WAITING_SELECT_GROUP ||
                             user.getState() == State.WAITING_SELECT_DIR) {
@@ -126,25 +118,21 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                         return;
                     }
 
-                    // 2. Savol berish jarayoni (Savol matni yozilganda)
                     if (user.getState() == State.WAITING_QUESTION) {
                         handleQuestionToAdmin(update, user);
                         return;
                     }
 
-                    // 3. Namunalar bo'limi (Namuna nomi tanlanganda)
                     if (user.getState() == State.VIEWING_SAMPLES) {
                         handleSampleRequest(user, text);
                         return;
                     }
 
-                    // 4. Admin menyusi va admin kutayotgan matnlar
                     if ((user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) && user.getState() != State.FREE) {
                         send(adminService.handleText(user, text));
                         return;
                     }
 
-                    // 5. Asosiy menyu tugmalari (Fayl yuborish, Savol berish tugmasi bosilganda)
                     send(userService.handleText(user, text));
                 }
             }

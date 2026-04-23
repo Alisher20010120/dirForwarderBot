@@ -30,7 +30,6 @@ public class UserService {
     public SendMessage handleStart(User user) {
         Long chatId = user.getChatId();
 
-        // Admin/SuperAdmin bo'lsa va telefoni bor bo'lsa — kontakt so'ramasdan user menyusi
         boolean isAdmin = user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN;
         if (isAdmin && user.getPhoneNumber() != null) {
             user.setState(State.FREE);
@@ -38,7 +37,6 @@ public class UserService {
             return getMainUserMenu(user);
         }
 
-        // Oddiy user yoki telefoni yo'q — kontakt so'raymiz
         user.setState(State.WAITING_PHONE);
         userRepository.save(user);
         return askPhone(chatId);
@@ -55,29 +53,25 @@ public class UserService {
             userRepository.save(user);
             SendMessage sm = new SendMessage(chatId.toString(),
                     "❌ Kechirasiz, sizning raqamingiz tizimda topilmadi.\n\n" +
-                            "📞 Iltimos, admin bilan bog'laning.");
+                            "📞 Iltimos, admin bilan bog'laning:\n@yordamchi10\n@ilmiy_konsultant1");
             sm.setReplyMarkup(new ReplyKeyboardRemove(true));
             return sm;
         }
 
         if (user.getId().equals(dbUser.getId())) {
-            // Bir xil yozuv — shunchaki yangilaymiz
             user.setChatId(chatId);
             user.setState(State.FREE);
             userRepository.save(user);
         } else {
-            // Ikki xil yozuv — merge qilamiz
             dbUser.setChatId(chatId);
             dbUser.setState(State.FREE);
 
-            // Agar session user SUPER_ADMIN yoki ADMIN bo'lsa — rolini saqlaymiz
             if (user.getRole() == Role.SUPER_ADMIN || user.getRole() == Role.ADMIN) {
                 dbUser.setRole(user.getRole());
             }
 
             userRepository.save(dbUser);
 
-            // Bo'sh session userni o'chiramiz
             userRepository.delete(user);
 
             user = dbUser;
@@ -122,7 +116,7 @@ public class UserService {
                 } else {
                     return new SendMessage(chatId.toString(),
                             "⚠️ Guruh yoki yo'nalish ma'lumotlaringiz topilmadi.\n" +
-                                    "📞 Iltimos, admin bilan bog'laning.");
+                                    "📞 Iltimos, admin bilan bog'laning:\n@yordamchi10\n@ilmiy_konsultant1");
                 }
 
             case "🔑 Admin panel":
@@ -143,7 +137,6 @@ public class UserService {
         return getMainUserMenu(user);
     }
 
-    // ✅ User obyekti bilan — admin bo'lsa "🔑 Admin panel" tugmasi ko'rinadi
     public SendMessage getMainUserMenu(User user) {
         Long chatId = user.getChatId();
         SendMessage sm = new SendMessage(chatId.toString(), "📋 Menyuni tanlang:");
@@ -162,7 +155,6 @@ public class UserService {
         keyboard.add(row1);
         keyboard.add(row2);
 
-        // Admin/SuperAdmin bo'lsa — "🔑 Admin panel" tugmasi qo'shiladi
         if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
             KeyboardRow row3 = new KeyboardRow();
             row3.add(new KeyboardButton("🔑 Admin panel"));
@@ -174,7 +166,6 @@ public class UserService {
         return sm;
     }
 
-    // ✅ Faqat chatId bilan — MyTelegramBot ichida ishlatilganda
     public SendMessage getMainUserMenu(Long chatId) {
         User user = userRepository.findByChatId(chatId).orElseGet(() -> {
             User dummy = new User();
