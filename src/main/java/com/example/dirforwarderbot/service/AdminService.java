@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 
 import java.io.FileInputStream;
+import java.io.File;
 import java.util.Optional;
 import java.util.Set;
 import java.util.HashSet;
@@ -24,6 +25,9 @@ public class AdminService {
     private final SampleRepository sampleRepository;
     private final UserService userService;
 
+    /**
+     * Inline tugmalar bosilganda ishlovchi metod
+     */
     public SendMessage handleCallback(User user, String data) {
         Long chatId = user.getChatId();
 
@@ -31,30 +35,32 @@ public class AdminService {
 
         if (data.equals("view_groups")) return keyboardService.getGroupList(chatId);
         if (data.equals("view_samples")) return keyboardService.getSampleList(chatId);
-        
+
         // Super Admin uchun adminlarni ko'rish
         if (data.equals("view_admins") && user.getRole() == Role.SUPER_ADMIN) {
             return keyboardService.getAdminList(chatId);
         }
-        
+
         if (data.equals("settings")) return keyboardService.getSettingsMenu(user);
 
+        // Guruhning Target Chat ID sini o'zgartirishni boshlash
         if (data.startsWith("edit_group_id_")) {
             String groupName = data.replace("edit_group_id_", "");
             user.setTempData(groupName);
             user.setState(State.WAITING_TARGET_CHAT_ID);
             userRepository.save(user);
-            return new SendMessage(chatId.toString(),
+            return keyboardService.getBackMenu(chatId,
                     "🆔 **" + groupName + "** guruhi uchun yangi Target Chat ID yuboring:");
         }
-        
+
+        // Namunani o'chirish
         if (data.startsWith("del_sample_")) {
             Long id = Long.parseLong(data.replace("del_sample_", ""));
             sampleRepository.deleteById(id);
             return keyboardService.getSampleList(chatId);
         }
 
-        // Super Admin uchun adminni vazifasidan bo'shatish
+        // Adminni vazifasidan bo'shatish (Super Admin)
         if (data.startsWith("demote_admin_") && user.getRole() == Role.SUPER_ADMIN) {
             Long adminId = Long.parseLong(data.replace("demote_admin_", ""));
             userRepository.findById(adminId).ifPresent(target -> {
@@ -67,12 +73,23 @@ public class AdminService {
         return null;
     }
 
+    /**
+     * Admin paneldagi matnli xabarlarga ishlovchi metod
+     */
     public SendMessage handleText(User user, String text) {
         Long chatId = user.getChatId();
 
         if (user.getRole() != Role.ADMIN && user.getRole() != Role.SUPER_ADMIN) return null;
 
-        // Super Admin tomonidan admin qo'shish
+        // Barcha holatlar uchun umumiy "Orqaga" mantiqi
+        if (text.equals("⬅️ Orqaga")) {
+            user.setState(State.ADMIN_MENU);
+            user.setTempData(null);
+            userRepository.save(user);
+            return keyboardService.getAdminReplyMenu(user);
+        }
+
+        // 1. Super Admin tomonidan admin qo'shish jarayoni
         if (user.getState() == State.WAITING_ADMIN_ID && user.getRole() == Role.SUPER_ADMIN) {
             try {
                 Long targetChatId = Long.parseLong(text.trim());
@@ -84,28 +101,18 @@ public class AdminService {
                     userRepository.save(targetUser);
                     user.setState(State.ADMIN_MENU);
                     userRepository.save(user);
-                    SendMessage sm = new SendMessage(chatId.toString(),
-                            "✅ <b>" + targetUser.getFullName() + "</b> muvaffaqiyatli ADMIN qilindi!");
-                    sm.enableHtml(true);
-                    return sm;
+
+                    SendMessage sm = new SendMessage(chatId.toString(), "✅ Foydalanuvchi admin qilindi!");
+                    return keyboardService.getAdminReplyMenu(user);
                 } else {
-                    return new SendMessage(chatId.toString(), "❌ Xato: Bu Chat ID bazada topilmadi.");
+                    return keyboardService.getBackMenu(chatId, "❌ Chat ID topilmadi. Qayta kiriting yoki orqaga qayting:");
                 }
-            } catch (NumberFormatException e) {
-                return new SendMessage(chatId.toString(), "⚠️ Iltimos, faqat raqamlardan iborat Chat ID yuboring.");
+            } catch (Exception e) {
+                return keyboardService.getBackMenu(chatId, "⚠️ Faqat raqamli Chat ID kiriting:");
             }
         }
 
-        // Guruh tanlanganda targetChatId so'rash
-        if (user.getState() == State.WAITING_GROUP_SELECT) {
-            String cleanGroupName = text.replace(" ✅", "").replace(" ⚠️", "").trim();
-            user.setTempData(cleanGroupName);
-            user.setState(State.WAITING_TARGET_CHAT_ID);
-            userRepository.save(user);
-            return new SendMessage(chatId.toString(),
-                    "🆔 \"" + cleanGroupName + "\" guruhi uchun Target Chat ID ni yuboring:");
-        }
-
+        // 2. Asosiy Reply tugmalar
         switch (text) {
             case "👥 Guruh qo'shish":
                 user.setState(State.WAITING_GROUP_SELECT);
@@ -119,21 +126,24 @@ public class AdminService {
                 if (user.getRole() == Role.SUPER_ADMIN) {
                     user.setState(State.WAITING_ADMIN_ID);
                     userRepository.save(user);
-                    return new SendMessage(chatId.toString(),
-                            "👤 Admin qilmoqchi bo'lgan foydalanuvchining Chat ID raqamini kiriting:");
+                    return keyboardService.getBackMenu(chatId, "👤 Admin Chat ID sini kiriting:");
                 }
                 break;
 
             case "📂 Namuna qo'shish":
                 user.setState(State.WAITING_SAMPLE_NAME);
                 userRepository.save(user);
-                return new SendMessage(chatId.toString(), "📝 Namuna nomini kiriting:");
+                return keyboardService.getBackMenu(chatId, "📝 Namuna nomini kiriting:");
 
             case "📥 Excel orqali User qo'shish":
                 user.setState(State.WAITING_EXCEL_FILE);
                 userRepository.save(user);
-                return new SendMessage(chatId.toString(),
-                        "Iltimos, foydalanuvchilar ro'yxati (.xlsx) faylini yuboring.");
+                return keyboardService.getBackMenu(chatId, "📁 Excel (.xlsx) faylini yuboring:");
+
+            case "📢 Xabarnoma yuborish":
+                user.setState(State.WAITING_BROADCAST);
+                userRepository.save(user);
+                return keyboardService.getBackMenu(chatId, "📢 Xabarnoma matnini kiriting:");
 
             case "🔝 Chiqish":
                 user.setState(State.FREE);
@@ -141,18 +151,27 @@ public class AdminService {
                 return userService.handleStart(user);
         }
 
+        // 3. Namuna nomi kiritilganda fayl so'rash
         if (user.getState() == State.WAITING_SAMPLE_NAME) {
             user.setTempData(text.trim());
             user.setState(State.WAITING_SAMPLE_FILE);
             userRepository.save(user);
-            return new SendMessage(chatId.toString(), "📥 Endi ushbu namuna uchun faylni yuboring:");
+            return keyboardService.getBackMenu(chatId, "📥 Endi ushbu namuna uchun faylni yuboring:");
         }
 
-        // targetChatId keldi — guruhni yangilaymiz
+        // 4. Guruh tanlanganda Target Chat ID so'rash
+        if (user.getState() == State.WAITING_GROUP_SELECT) {
+            String cleanName = text.replace(" ✅", "").replace(" ⚠️", "").trim();
+            user.setTempData(cleanName);
+            user.setState(State.WAITING_TARGET_CHAT_ID);
+            userRepository.save(user);
+            return keyboardService.getBackMenu(chatId, "🆔 \"" + cleanName + "\" uchun Target Chat ID:");
+        }
+
+        // 5. Target Chat ID kiritilganda saqlash
         if (user.getState() == State.WAITING_TARGET_CHAT_ID) {
-            String groupName = user.getTempData();
-            Group group = groupRepository.findByName(groupName).orElse(new Group());
-            group.setName(groupName);
+            Group group = groupRepository.findByName(user.getTempData()).orElse(new Group());
+            group.setName(user.getTempData());
             group.setTargetChatId(text.trim());
             groupRepository.save(group);
 
@@ -165,7 +184,10 @@ public class AdminService {
         return null;
     }
 
-    public void importUsersFromExcel(java.io.File file) {
+    /**
+     * Excel fayldan userlarni sinxronizatsiya qilib yuklash
+     */
+    public void importUsersFromExcel(File file) {
         Set<String> excelPhones = new HashSet<>();
 
         try (FileInputStream fis = new FileInputStream(file);
@@ -178,13 +200,11 @@ public class AdminService {
                 String fullName = getCellValue(row.getCell(0)).trim();
                 String direction = getCellValue(row.getCell(1)).trim();
                 String groupName = getCellValue(row.getCell(2)).trim();
-                String rawPhone = getCellValue(row.getCell(3));
-                String phone = rawPhone.replaceAll("[^0-9]", "");
+                String phone = getCellValue(row.getCell(3)).replaceAll("[^0-9]", "");
 
                 if (phone.isEmpty() || fullName.isEmpty()) continue;
                 excelPhones.add(phone);
 
-                // Dublikatni oldini olish: Avval telefon, keyin ism bo'yicha qidiramiz
                 User user = userRepository.findByPhoneNumber(phone)
                         .orElseGet(() -> userRepository.findByFullName(fullName).orElse(null));
 
@@ -200,37 +220,26 @@ public class AdminService {
                 user.setSelectedGroup(groupName);
                 userRepository.save(user);
 
-                // Guruhni avtomatik Group jadvaliga qo'shish
-                if (!groupName.isEmpty()) {
-                    if (groupRepository.findByName(groupName).isEmpty()) {
-                        Group g = new Group();
-                        g.setName(groupName);
-                        groupRepository.save(g);
-                    }
+                if (!groupName.isEmpty() && groupRepository.findByName(groupName).isEmpty()) {
+                    Group g = new Group();
+                    g.setName(groupName);
+                    groupRepository.save(g);
                 }
             }
 
-            // SINXRONIZATSIYA: Excelda yo'q USERlarni bazadan o'chirish
-            List<User> dbUsers = userRepository.findAll();
-            for (User dbUser : dbUsers) {
-                if (dbUser.getRole() == Role.USER) {
-                    if (!excelPhones.contains(dbUser.getPhoneNumber())) {
-                        userRepository.delete(dbUser);
-                    }
-                }
-            }
+            // Excelda yo'q USERlarni o'chirish (Sinxronizatsiya)
+            userRepository.findAll().stream()
+                    .filter(u -> u.getRole() == Role.USER && !excelPhones.contains(u.getPhoneNumber()))
+                    .forEach(userRepository::delete);
 
         } catch (Exception e) {
-            throw new RuntimeException("Excelni qayta ishlashda xato: " + e.getMessage());
+            throw new RuntimeException("Excel xatosi: " + e.getMessage());
         }
     }
 
     private String getCellValue(Cell cell) {
         if (cell == null) return "";
-        switch (cell.getCellType()) {
-            case STRING: return cell.getStringCellValue().trim();
-            case NUMERIC: return String.valueOf((long) cell.getNumericCellValue());
-            default: return "";
-        }
+        if (cell.getCellType() == CellType.NUMERIC) return String.valueOf((long) cell.getNumericCellValue());
+        return cell.getStringCellValue().trim();
     }
 }

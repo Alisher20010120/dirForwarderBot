@@ -75,6 +75,10 @@ public class KeyboardService {
             row3.add(new KeyboardButton("➕ Admin qo'shish"));
             keyboard.add(row3);
         }
+        KeyboardRow row4 = new KeyboardRow();
+        row4.add(new KeyboardButton("📢 Xabarnoma yuborish"));
+        keyboard.add(row4);
+
 
         keyboard.add(new KeyboardRow(List.of(new KeyboardButton("🔝 Chiqish"))));
 
