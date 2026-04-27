@@ -188,6 +188,7 @@ public class AdminService {
              Workbook workbook = new XSSFWorkbook(fis)) {
 
             Sheet sheet = workbook.getSheetAt(0);
+
             for (Row row : sheet) {
                 if (row.getRowNum() == 0) continue;
 
@@ -199,34 +200,35 @@ public class AdminService {
                 if (phone.isEmpty() || fullName.isEmpty()) continue;
                 excelPhones.add(phone);
 
-                User user = userRepository.findByPhoneNumber(phone)
-                        .orElseGet(() -> userRepository.findByFullName(fullName).orElse(null));
-
-                if (user == null) {
-                    user = new User();
-                    user.setRole(Role.USER);
-                    user.setState(State.FREE);
-                }
+                User user = userRepository.findByPhoneNumber(phone).orElse(new User());
 
                 user.setFullName(fullName);
                 user.setPhoneNumber(phone);
                 user.setSelectedDirection(direction);
                 user.setSelectedGroup(groupName);
+                user.setRole(user.getRole() == null ? Role.USER : user.getRole());
+                user.setState(user.getState() == null ? State.FREE : user.getState());
                 userRepository.save(user);
 
-                if (!groupName.isEmpty() && groupRepository.findByName(groupName).isEmpty()) {
-                    Group g = new Group();
-                    g.setName(groupName);
-                    groupRepository.save(g);
+                if (!groupName.isEmpty()) {
+                    if (groupRepository.findByName(groupName).isEmpty()) {
+                        Group g = new Group();
+                        g.setName(groupName);
+                        groupRepository.save(g);
+                    }
                 }
             }
 
-            // Excelda yo'q USERlarni o'chirish (Sinxronizatsiya)
-            userRepository.findAll().stream()
-                    .filter(u -> u.getRole() == Role.USER && !excelPhones.contains(u.getPhoneNumber()))
-                    .forEach(userRepository::delete);
+
+            List<User> allUsers = userRepository.findAll();
+            for (User u : allUsers) {
+                if (u.getRole() == Role.USER && u.getPhoneNumber() != null && !excelPhones.contains(u.getPhoneNumber())) {
+                    userRepository.delete(u);
+                }
+            }
 
         } catch (Exception e) {
+            e.printStackTrace();
             throw new RuntimeException("Excel xatosi: " + e.getMessage());
         }
     }
