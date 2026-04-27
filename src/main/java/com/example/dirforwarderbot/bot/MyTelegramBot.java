@@ -49,6 +49,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
             Long chatId = extractChatId(update);
             if (chatId == null) return;
 
+            // Guruh xabarlari
             if (update.hasMessage() && (update.getMessage().isGroupMessage() || update.getMessage().isSuperGroupMessage())) {
                 if (update.getMessage().getReplyToMessage() != null) handleAdminReply(update);
                 return;
@@ -56,6 +57,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
             User user = userRepository.findByChatId(chatId).orElseGet(() -> createNewUser(update, chatId));
 
+            // Callback query
             if (update.hasCallbackQuery()) {
                 if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
                     send(adminService.handleCallback(user, update.getCallbackQuery().getData()));
@@ -65,33 +67,32 @@ public class MyTelegramBot extends TelegramLongPollingBot {
 
             if (update.hasMessage()) {
 
-                if (update.getMessage().hasText() && update.getMessage().getText().equals("⬅️ Orqaga")) {
-                    if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
-                        user.setState(State.ADMIN_MENU);
-                        user.setTempData(null);
-                        userRepository.save(user);
-                        send(keyboardService.getAdminReplyMenu(user));
-                    } else {
-                        user.setState(State.FREE);
-                        userRepository.save(user);
-                        send(userService.getMainUserMenu(user));
-                    }
-                    return;
-                }
-
+                // Kontakt
                 if (update.getMessage().hasContact() && user.getState() == State.WAITING_PHONE) {
                     send(userService.handleContact(user, update.getMessage().getContact()));
                     return;
                 }
 
-                if (update.getMessage().hasDocument() || update.getMessage().hasVideo() ||
-                        update.getMessage().hasAudio() || update.getMessage().hasVoice() ||
-                        update.getMessage().hasVideoNote() || update.getMessage().hasSticker()) {
-
-                    if (user.getState() == State.WAITING_BROADCAST) {
-                        handleBroadcast(user, update.getMessage().getChatId(), update.getMessage().getMessageId());
+                // Xabarnoma uchun — matn "⬅️ Orqaga" bo'lmasa broadcast qilamiz
+                if (user.getState() == State.WAITING_BROADCAST) {
+                    // Matn xabar bo'lsa va "Orqaga" bo'lsa — broadcast EMAS
+                    boolean isBackButton = update.getMessage().hasText()
+                            && update.getMessage().getText().equals("⬅️ Orqaga");
+                    if (!isBackButton) {
+                        handleBroadcast(user, update.getMessage().getChatId(),
+                                update.getMessage().getMessageId());
                         return;
                     }
+                    // "Orqaga" bo'lsa — quyidagi matn blokiga o'tadi
+                }
+
+                // Fayl, video, ovoz va boshqalar
+                if (update.getMessage().hasDocument() ||
+                        update.getMessage().hasVideo() ||
+                        update.getMessage().hasAudio() ||
+                        update.getMessage().hasVoice() ||
+                        update.getMessage().hasVideoNote() ||
+                        update.getMessage().hasSticker()) {
 
                     if (user.getState() == State.WAITING_SAMPLE_FILE) {
                         saveSampleFile(update, user);
@@ -104,6 +105,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                     return;
                 }
 
+                // Matn
                 if (update.getMessage().hasText()) {
                     String text = update.getMessage().getText();
 
@@ -118,13 +120,33 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                             userRepository.save(user);
                             send(keyboardService.getAdminReplyMenu(user));
                         } else {
-                            send(new SendMessage(chatId.toString(), "❌ Sizda admin huquqi yo'q!"));
+                            send(new SendMessage(chatId.toString(), "❌ Kechirasiz, sizda admin huquqi yo'q!"));
                         }
                         return;
                     }
 
-                    if (user.getState() == State.WAITING_BROADCAST) {
-                        handleBroadcast(user, update.getMessage().getChatId(), update.getMessage().getMessageId());
+                    if (text.equals("⬅️ Orqaga")) {
+                        // Admin menyusida biror jarayonda bo'lsa — admin menyusiga qaytsin
+                        boolean isAdminState = user.getState() == State.ADMIN_MENU
+                                || user.getState() == State.WAITING_GROUP_SELECT
+                                || user.getState() == State.WAITING_TARGET_CHAT_ID
+                                || user.getState() == State.WAITING_SAMPLE_NAME
+                                || user.getState() == State.WAITING_SAMPLE_FILE
+                                || user.getState() == State.WAITING_EXCEL_FILE
+                                || user.getState() == State.WAITING_ADMIN_ID
+                                || user.getState() == State.WAITING_BROADCAST;
+
+                        if ((user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) && isAdminState) {
+                            user.setState(State.ADMIN_MENU);
+                            user.setTempData(null);
+                            userRepository.save(user);
+                            send(keyboardService.getAdminReplyMenu(user));
+                        } else {
+                            // User menyusida — user menyusiga qaytsin
+                            user.setState(State.FREE);
+                            userRepository.save(user);
+                            send(userService.getMainUserMenu(user));
+                        }
                         return;
                     }
 
@@ -139,7 +161,7 @@ public class MyTelegramBot extends TelegramLongPollingBot {
                     }
 
                     if ((user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN)
-                            && user.getState() != State.FREE && user.getState() != State.ADMIN_MENU) {
+                            && user.getState() != State.FREE) {
                         send(adminService.handleText(user, text));
                         return;
                     }
@@ -152,6 +174,10 @@ public class MyTelegramBot extends TelegramLongPollingBot {
         }
     }
 
+    /**
+     * Barcha USER larga xabarni forward qilish.
+     * Har qanday turdagi xabar ishlaydi: matn, rasm, video, ovoz, fayl, kanal posti.
+     */
     private void handleBroadcast(User admin, Long fromChatId, Integer messageId) {
         java.util.List<User> allUsers = userRepository.findAll();
         int sent = 0;

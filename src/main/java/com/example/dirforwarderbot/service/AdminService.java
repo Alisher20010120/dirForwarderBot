@@ -81,7 +81,7 @@ public class AdminService {
 
         if (user.getRole() != Role.ADMIN && user.getRole() != Role.SUPER_ADMIN) return null;
 
-        // Barcha holatlar uchun umumiy "Orqaga" mantiqi
+        // 1. "Orqaga" tugmasi bosilganda har doim asosiy admin menyusiga qaytarish
         if (text.equals("⬅️ Orqaga")) {
             user.setState(State.ADMIN_MENU);
             user.setTempData(null);
@@ -89,31 +89,33 @@ public class AdminService {
             return keyboardService.getAdminReplyMenu(user);
         }
 
-        // 1. Super Admin tomonidan admin qo'shish jarayoni
+        // 2. Admin qo'shish jarayoni (Chat ID kutish)
         if (user.getState() == State.WAITING_ADMIN_ID && user.getRole() == Role.SUPER_ADMIN) {
             try {
                 Long targetChatId = Long.parseLong(text.trim());
                 Optional<User> targetUserOpt = userRepository.findByChatId(targetChatId);
-
                 if (targetUserOpt.isPresent()) {
                     User targetUser = targetUserOpt.get();
                     targetUser.setRole(Role.ADMIN);
                     userRepository.save(targetUser);
                     user.setState(State.ADMIN_MENU);
                     userRepository.save(user);
-
-                    SendMessage sm = new SendMessage(chatId.toString(), "✅ Foydalanuvchi admin qilindi!");
                     return keyboardService.getAdminReplyMenu(user);
-                } else {
-                    return keyboardService.getBackMenu(chatId, "❌ Chat ID topilmadi. Qayta kiriting yoki orqaga qayting:");
                 }
+                return keyboardService.getBackMenu(chatId, "❌ Chat ID topilmadi. Qayta kiriting:");
             } catch (Exception e) {
                 return keyboardService.getBackMenu(chatId, "⚠️ Faqat raqamli Chat ID kiriting:");
             }
         }
 
-        // 2. Asosiy Reply tugmalar
+        // 3. ASOSIY SWITCH - Tugmalar bosilganda ishlaydi
         switch (text) {
+            case "📢 Xabarnoma yuborish":
+                user.setState(State.WAITING_BROADCAST);
+                userRepository.save(user);
+                // MUHIM: Bu yerda albatta getBackMenu qaytarish kerak, shunda "Orqaga" tugmasi chiqadi
+                return keyboardService.getBackMenu(chatId, "📢 Barcha foydalanuvchilarga yuboriladigan xabarnoma matnini kiriting:");
+
             case "👥 Guruh qo'shish":
                 user.setState(State.WAITING_GROUP_SELECT);
                 userRepository.save(user);
@@ -140,18 +142,13 @@ public class AdminService {
                 userRepository.save(user);
                 return keyboardService.getBackMenu(chatId, "📁 Excel (.xlsx) faylini yuboring:");
 
-            case "📢 Xabarnoma yuborish":
-                user.setState(State.WAITING_BROADCAST);
-                userRepository.save(user);
-                return keyboardService.getBackMenu(chatId, "📢 Xabarnoma matnini kiriting:");
-
             case "🔝 Chiqish":
                 user.setState(State.FREE);
                 userRepository.save(user);
                 return userService.handleStart(user);
         }
 
-        // 3. Namuna nomi kiritilganda fayl so'rash
+        // 4. Boshqa holatlar (Namuna nomi, Guruh tanlash va h.k.)
         if (user.getState() == State.WAITING_SAMPLE_NAME) {
             user.setTempData(text.trim());
             user.setState(State.WAITING_SAMPLE_FILE);
@@ -159,22 +156,19 @@ public class AdminService {
             return keyboardService.getBackMenu(chatId, "📥 Endi ushbu namuna uchun faylni yuboring:");
         }
 
-        // 4. Guruh tanlanganda Target Chat ID so'rash
         if (user.getState() == State.WAITING_GROUP_SELECT) {
             String cleanName = text.replace(" ✅", "").replace(" ⚠️", "").trim();
             user.setTempData(cleanName);
             user.setState(State.WAITING_TARGET_CHAT_ID);
             userRepository.save(user);
-            return keyboardService.getBackMenu(chatId, "🆔 \"" + cleanName + "\" uchun Target Chat ID:");
+            return keyboardService.getBackMenu(chatId, "🆔 \"" + cleanName + "\" uchun Target Chat ID kiriting:");
         }
 
-        // 5. Target Chat ID kiritilganda saqlash
         if (user.getState() == State.WAITING_TARGET_CHAT_ID) {
             Group group = groupRepository.findByName(user.getTempData()).orElse(new Group());
             group.setName(user.getTempData());
             group.setTargetChatId(text.trim());
             groupRepository.save(group);
-
             user.setState(State.ADMIN_MENU);
             user.setTempData(null);
             userRepository.save(user);
